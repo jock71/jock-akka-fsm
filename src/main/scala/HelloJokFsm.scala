@@ -1,6 +1,5 @@
 import akka.actor.{ActorSystem, Inbox, Props}
-import jok.akka.fsm.Fsm
-import jok.akka.fsm.Fsm._
+import jok.akka.fsm.FsmStashBased
 
 import scala.concurrent.duration._
 
@@ -10,15 +9,15 @@ case object Toggle
 
 //}
 
-class TestEntryExitFsm extends Fsm {
+class TestEntryExitFsm extends FsmStashBased {
 
 
   def stateOff: Receive = {
-    case Entry =>
+    case FsmStashBased.Entry =>
       println("stateOff:Entry")
       doEntry()
 
-    case exit: Exit =>
+    case exit: FsmStashBased.Exit =>
       println("stateOff:Exit")
       doExit(exit)
 
@@ -32,11 +31,11 @@ class TestEntryExitFsm extends Fsm {
   }
 
   def stateOn: Receive = {
-    case Entry =>
+    case FsmStashBased.Entry =>
       println("stateOn:Entry")
       doEntry()
 
-    case exit: Exit =>
+    case exit: FsmStashBased.Exit =>
       println("stateOn:Exit")
       doExit(exit)
 
@@ -69,7 +68,7 @@ object HelloJokFsm extends App {
   // Create an "actor-in-a-box"
   val inbox = Inbox.create(system)
 
-  hsm ! Entry
+  hsm ! FsmStashBased.Entry
 
   system.scheduler.schedule(0.seconds, 5.second, hsm, Toggle)(system.dispatcher, hsm)
 
