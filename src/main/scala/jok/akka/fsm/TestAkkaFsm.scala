@@ -5,43 +5,6 @@ import akka.actor._
 import scala.concurrent.duration._
 
 
-trait EnterExit[S, SD] {
-  this: FSM[S, SD] ⇒
-
-
-  private def _onEnter(state: S): Unit = {
-    entryMap.get(state) match {
-      case Some(enterHandler) => enterHandler(nextStateData)
-      case _ => // no entry defined for this state
-    }
-  }
-
-  private def _onExit(state: S): Unit = {
-    exitMap.get(state) match {
-      case Some(exitHandler) => exitHandler(stateData)
-      case _ => // no exit handler defined for this state
-    }
-  }
-
-
-  onTransition {
-    case (from: S, to: S) =>
-      _onExit(from)
-      _onEnter(to)
-  }
-
-  def onEntry(state: S)(onEnterFn: PartialFunction[SD, Unit]): Unit = {
-    entryMap(state) = onEnterFn
-  }
-
-
-  def onExit(state: S)(onExitFn: PartialFunction[SD, Unit]): Unit = {
-    exitMap(state) = onExitFn
-  }
-
-  private val entryMap = new scala.collection.mutable.HashMap[S, PartialFunction[SD, Unit]]()
-  private val exitMap = new scala.collection.mutable.HashMap[S, PartialFunction[SD, Unit]]()
-}
 
 /**
   * Created by andrea on 11/11/15.
@@ -77,8 +40,7 @@ case object GoToSleep
 case object WorkCompleted
 
 class DayWorker extends Actor
-with FSM[State, StateData]
-with EnterExit[State, StateData] {
+with FsmMod[State, StateData] {
   val goToSleepTmr = "goToSleep"
   // let's start our day awake
   println("staring FSM, initializing data for Waiting state (since first entry does not work)")
@@ -86,13 +48,13 @@ with EnterExit[State, StateData] {
   startWith(Waiting, AwakeData(Some(goToSleepTmr), None))
 
   onEntry(Waiting) {
-    case AwakeData(Some(_), None) =>
+    case data@AwakeData(Some(_), None) =>
       println("Waiting.onEntry() fine, we are entering/re-entering Waiting state with valid goToSleep timer and no workinprogress")
+      data
     case _ =>
-      println("Waiting.onEntry() no valid data while entering Waiting state (refresh AwakeData with valid info")
+      println("Waiting.onEntry() just waken-up let's create goToSleepTmr")
       setTimer(goToSleepTmr, GoToSleep, 10 second)
-      // stay xxxx cannot be used!
-      goto(Waiting) using AwakeData(Some(goToSleepTmr), None)
+      AwakeData(Some(goToSleepTmr), None)
   }
   when(Waiting) {
     case Event(Work(workId), data: AwakeData) =>
@@ -109,16 +71,19 @@ with EnterExit[State, StateData] {
       throw new Exception
   }
   onExit(Waiting) {
-    case any =>
-      println("Waiting.onExit() with $any data")
+    case data =>
+      println(s"Waiting.onExit() with $data data")
+      data
   }
 
   onEntry(Working) {
-    case AwakeData(Some(_), Some(workId)) =>
+    case data@AwakeData(Some(_), Some(workId)) =>
       println(s"Working.onEntry(): enter into Working state. In two seconds I should finish workID:$workId")
       setTimer("workInProgressTimer", WorkCompleted, 2 second)
-    case any =>
-      println(s"ERROR:Working.onEntry() entering Working state with invalid data $any")
+      data
+    case data =>
+      println(s"ERROR:Working.onEntry() entering Working state with invalid data $data")
+      data
   }
   when(Working) {
     case Event(Work(workId), _) =>
@@ -138,9 +103,10 @@ with EnterExit[State, StateData] {
       throw new Exception
   }
   onExit(Working) {
-    case any =>
-      println(s"Working.exit() with $any data")
+    case data =>
+      println(s"Working.exit() with $data data")
       cancelTimer("workInProgressTimer")
+      data
   }
 
   onEntry(Sleeping) {
@@ -148,8 +114,7 @@ with EnterExit[State, StateData] {
       println(s"Sleeping.onEntry with $any data")
       val wakeUpTimer = "wakeUpTimer"
       setTimer(wakeUpTimer, WakeUp, 10 second)
-      //xxx stay cannot be used in onEntry onExit ..it is playing with currentState
-      goto(Sleeping) using SleepingData(Some(wakeUpTimer))
+      SleepingData(Some(wakeUpTimer))
   }
   when(Sleeping) {
     case Event(Work(workId), _) =>
@@ -166,11 +131,12 @@ with EnterExit[State, StateData] {
       throw new Exception
   }
   onExit(Sleeping) {
-    case SleepingData(Some(wakeUpTimer)) =>
+    case data@SleepingData(Some(wakeUpTimer)) =>
       println(s"Sleeping.onExit with a wakeUpTimer that should be expired")
       cancelTimer(wakeUpTimer)
-    case any =>
-      println(s"ERROR: Sleeping.onExit exit from Sleeping with $any data")
+      SleepingData(None)
+    case data =>
+      println(s"ERROR: Sleeping.onExit exit from Sleeping with $data data")
       throw new Exception
   }
 
@@ -198,6 +164,7 @@ object TestAkkaFsmWithEntryExitTrait extends App {
   system.scheduler.scheduleOnce(5.seconds, hsm, Work(4))(system.dispatcher, hsm)
   system.scheduler.scheduleOnce(15.seconds, hsm, Work(5))(system.dispatcher, hsm)
 
+  system.scheduler.schedule(20.seconds, 3.seconds, hsm, Work(888))(system.dispatcher, hsm)
 
 }
 
